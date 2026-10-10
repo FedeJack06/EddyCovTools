@@ -1,71 +1,113 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, List
 
 @dataclass
 class InputFileConfig:
     """
-    Configuration parameters for importing data from different file types. 
-    Contains the structure of the input files and the database tables.
-    The aim is putting in relation the name of the column in the input
-    files and the name of the column in the database table and in the Pandas dataframe.
+    Configuration parameters for importing data from one type of files. 
+    This class contains the structure of the input file and the related database table.
+    The input file must contain data arranged in columns.
+    Use this class to put in relation a column in the input file 
+    with the correspondingcolumn in the database table.
+    The file is imported in a Pandas dataframe, then the dataframe is imported 
+    in a database table.
 
-    If you want to import a column from files, you have to insert the column info
-    as a new entry in the dictionary named cols:
-    1) Set the name of the column in the input file, it will be the same in the Pandas
-       dataframe related to the file (dictionary key)
-    2) Set the Pandas type the column should have in the dataframe (first tuple entry)
-    3) Set name of the same column in the table of the database (second tuple entry)
-    4) Set column SQL type the column should have in the database (third tuple entry)
+    If you want to import a column from a file, you have to insert: 
+    * the column info as a new entry in the dictionary named cols
+        1) Set the name of the column of the input file, it will be the same in the Pandas
+        dataframe related to the file (dictionary key)
+        2) Set the Pandas type the column should have in the dataframe (first tuple entry)
+        3) Set name the column should have in the database table (second tuple entry)
+        4) Set column SQL type the column should have in the database table (third tuple entry)
 
-    Set the time interval in milliseconds between two measure in the input files.
+    .. code-block:: python
+        cols = {
+            "col_A": (int, "db_col_A", "INTEGER"),
+            "col_B": (float, "db_col_B", "DECIMAL(5,2)")
+        }
+
+    * the time interval in milliseconds between two measure in the input files.
 
     Three default profiles of input file are present, you can set these profile with
     the three methods. They refer to TOA5 input files generated from standard
     eddy covariance experiment.
     
-    Attributes:
-        sampling_rate_ms: float: milliseconds between two measure.
-        cols: Dict[str, Tuple[type, str, str]]: Key is the name of the column in the input files.
-              Value is a tuple contains in order, the pandas type of the column,
-              the name of the column in the database table (can be different from file),
-              the SQL type of the column in the table (used to create the table). 
+    Attributes
+    ----------
+    sampling_rate_ms : float 
+        milliseconds between two measure.
+    cols : Dict[str, Tuple[type, str, str]]
+        Key is the name of the column in the input files.
+        Value is a tuple contains in order, the pandas type of the column,
+        the name of the column in the database table (can be different from file),
+        the SQL type of the column in the table (used to create the table).
+
+    Examples
+    --------
+    >>> cols = {
+            "col_A": (int, "db_col_A", "INTEGER"),
+            "col_B": (float, "db_col_B", "DECIMAL(5,2)")
+        }
+    >>> configCustom = InputFileConfig(sampling_rate_ms=1000, cols=cols)
+    >>> configGill = InputFileConfig.gillwindmaster(level_n=1, sampling_rate_ms=50)
+    >>> configRot = InputFileConfig.rotated_wind(rot_type="dr", sampling_rate_ms=50)
+    >>> configTherm = InputFileConfig.defaultThermohygrometer(level_n=1, sampling_rate_ms=1000)
+    >>> configStatus = InputFileConfig.defaultStatus(sampling_rate_ms=1000)
     """
     sampling_rate_ms: float
     cols: Dict[str, Tuple[type, str, str]]
 
     @classmethod
     def gillwindmaster(cls,
-                       n_level: int = 1,
+                       level_n: int = 1,
                        sampling_rate_ms: float = 50):
         """
-        Set the configuration for standard sonic anemometers, with n vertical 
-        levels (Gill Windmaster). For each level (identified by the number i) four
-        variable are expected: u_i, v_i, w_i, three components of the wind and 
-        Ts_i the sonic temperature. Gill Windmaster, with high precision enabled,
-        generate measures with three decimal digits. The maximum value is 50 m/s so
-        the database type for sonic measure can be DECIMAL(6,3), to save space. 
-        Set the sampling rate for this type of measure.
+        Create the configuration to import data from a sonic Gill Windmaster datafile. 
+        The sensor is located at n-th vertical level.
+        Four variable are expected in the input file: u_i, v_i, w_i, three components of 
+        the wind and Ts_i the sonic temperature (i is the number of the level).
 
-        Attributes:
-            n_levels: number of vertical levels or number of sonic instruments,
-                      recorded in the same file.
-            sampling_rate_ms: milliseconds between two measure. Default 50ms (20Hz).
+        Gill Windmaster generate measures with three decimal digits, if high precision is 
+        enabled. The maximum value is 50 m/s so the database type for sonic measure can 
+        be DECIMAL(6,3), to save memory. Set the sampling rate for this type of measure.
+
+        Parameters
+        ----------
+        level_n : int
+            number of vertical levels of the instruments.
+        sampling_rate_ms : float
+            milliseconds between two measure, default 50ms (20Hz).
+
+        Raises
+        ------
+        TypeError
+            If level_n is not an int.
+        ValueError
+            If level_n is not positive and non-zero.
         """
-        if not isinstance(n_level, int):
-            raise TypeError("Number of level/instruments must be an int.")
-        if n_level <= 0:
-            raise ValueError("Number of level/instruments must be non zero and positive.")
-        
-        
-        cols_gill_windmaster = {}
+        if not isinstance(level_n, int):
+            raise TypeError("Number of the level/instruments must be an int.")
+        if level_n <= 0:
+            raise ValueError("Number of the level/instruments must be non zero and positive.")
 
-        #for i in range(1, n_levels + 1):
-        i = n_level
-        cols_gill_windmaster["TIMESTAMP"] = ('datetime64[ms]', "datetime", "DATETIME PRIMARY KEY")
+        i = level_n
+        cols_gill_windmaster = {
+            "TIMESTAMP": ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY"),
+            f"u_{i}": (float, "u", "DECIMAL(6,3)"),
+            f"v_{i}": (float, "v", "DECIMAL(6,3)"),
+            f"w_{i}": (float, "w", "DECIMAL(6,3)"),
+            f"Ts_{i}": (float, "ts", "DECIMAL(6,3)")
+        }
+
+        '''i = level_n
+        cols_gill_windmaster["TIMESTAMP"] = ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY")
         cols_gill_windmaster[f"u_{i}"]  = (float, "u", "DECIMAL(6,3)")
         cols_gill_windmaster[f"v_{i}"]  = (float, "v", "DECIMAL(6,3)")
         cols_gill_windmaster[f"w_{i}"]  = (float, "w", "DECIMAL(6,3)")
-        cols_gill_windmaster[f"Ts_{i}"] = (float, "ts", "DECIMAL(6,3)")
+        cols_gill_windmaster[f"Ts_{i}"] = (float, "ts", "DECIMAL(6,3)")'''
         
         # Create gill object
         return cls(
@@ -73,6 +115,83 @@ class InputFileConfig:
             sampling_rate_ms = sampling_rate_ms
         )
     
+    @classmethod
+    def defaultThermohygrometer(cls, 
+                                level_n: int = 1, 
+                                sampling_rate_ms: float = 1000):
+        """
+        Create the configuration to import data from a thermohygrometer datafile. 
+        The sensor is located at n-th vertical level.
+        Two variable are expected in the input file: AirTC_i and RH_i, representing 
+        the air temperature and relative humidity (i is the number of the level).
+        
+        Standard slow termoigrometers generate measures with one/two decimal digits.
+        The database type for these measure can be DECIMAL(5,2), to save memory. 
+        Set the sampling rate for this type of measure.
+
+        Parameters
+        ----------
+        level_n : int
+            number of vertical levels of the instruments.
+        sampling_rate_ms : float
+            milliseconds between two measure, default 1s (1Hz).
+
+        Raises
+        ------
+        TypeError
+            If level_n is not an int.
+        ValueError
+            If level_n is not positive and non-zero.
+        """
+        if not isinstance(level_n, int):
+            raise TypeError("Number of the level/instruments must be an int.")
+        if level_n <= 0:
+            raise ValueError("Number of the level/instruments must be non zero and positive.")
+
+        i = level_n
+        cols_trh = {
+            "TIMESTAMP": ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY"),
+            f"AirTC{i}": (float, f"t", "DECIMAL(5,2)"),
+            f"RH{i}": (float, f"rh", "DECIMAL(5,2)")
+        }
+
+        #for i in range(1, level_ns + 1):
+        '''i = level_n
+        cols_trh["TIMESTAMP"] = ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY")
+        cols_trh[f"AirTC{i}"] = (float, f"t", "DECIMAL(5,2)")
+        cols_trh[f"RH{i}"] = (float, f"rh", "DECIMAL(5,2)")'''
+
+        return cls(
+            cols = cols_trh,
+            sampling_rate_ms = sampling_rate_ms
+        )
+
+    @classmethod
+    def defaultStatus(cls, 
+                      sampling_rate_ms: float = 1000):
+        """
+        Create the configuration to import data from the status files, containing 
+        info about the status of the station, for example a Campbell datalogger. 
+        Here an example with battery voltage of the station and info about the SD card
+        where files are stored. Set the sampling rate between two records.
+
+        Parameters
+        ----------
+        sampling_rate_ms : float
+            milliseconds between two records. Default 1s (1Hz).
+        """
+
+        cols_status = {
+            "TIMESTAMP" : ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY"),
+            "BattV_Min": (float, "battVmin", "DECIMAL(5,2)"),
+            "CardStatus": (str, "card_status", "VARCHAR(10)")
+        }
+
+        return cls( 
+            cols = cols_status,
+            sampling_rate_ms = sampling_rate_ms
+        )
+
     @classmethod
     def rotated_wind(cls,
                      rot_type: str,
@@ -85,98 +204,43 @@ class InputFileConfig:
         the database type for sonic measure can be DECIMAL(6,3), to save space. 
         Set the sampling rate for this type of measure.
 
-        Attributes:
-            rot_type: planar_fit "pf" or double rotation "dr"
-            sampling_rate_ms: milliseconds between two measure. Default 50ms (20Hz).
+        Parameters
+        ----------
+        rot_type : str
+            planar_fit "pf" or double rotation "dr"
+        sampling_rate_ms : float
+            milliseconds between two measure. Default 50ms (20Hz).
+        
+        Raises
+        ------
+        ValueError
+            If rot_type is not 'pf' or 'dr'.
         """
         
-        rot_cols = {}
+        rot_cols = {
+            "TIMESTAMP": ("datetime64[ms]", "datetime", "DATETIME PRIMARY KEY"),
+            "u": (float, "u", "DECIMAL(6,3)"),
+            "v": (float, "v", "DECIMAL(6,3)"),
+            "w": (float, "w", "DECIMAL(6,3)"),
+            "Ts": (float, "ts", "DECIMAL(6,3)")
+        }
 
         if rot_type == "dr":
-            rot_cols["TIMESTAMP"] = ('datetime64[ms]', "datetime", "DATETIME PRIMARY KEY")
-            rot_cols["u"]  = (float, "u", "DECIMAL(6,3)")
-            rot_cols["v"]  = (float, "v", "DECIMAL(6,3)")
-            rot_cols["w"]  = (float, "w", "DECIMAL(6,3)")
-            rot_cols["Ts"] = (float, "ts", "DECIMAL(6,3)")
             rot_cols["theta"] = (float, "theta", "DECIMAL(5,2)")
             rot_cols["phi"] = (float, "phi", "DECIMAL(5,2)")
         elif rot_type == "pf":
-            rot_cols["TIMESTAMP"] = ('datetime64[ms]', "datetime", "DATETIME PRIMARY KEY")
-            rot_cols["u"]  = (float, "u", "DECIMAL(6,3)")
-            rot_cols["v"]  = (float, "v", "DECIMAL(6,3)")
-            rot_cols["w"]  = (float, "w", "DECIMAL(6,3)")
-            rot_cols["Ts"] = (float, "ts", "DECIMAL(6,3)")
             rot_cols["gamma"] = (float, "gamma", "DECIMAL(5,2)")
         else:
             raise ValueError("rot_type must be 'pf' or 'dr'.")
         
-        # Create gill object
         return cls(
             cols = rot_cols,
             sampling_rate_ms = sampling_rate_ms
         )
     
-    @classmethod
-    def defaultThermohygrometer(cls, 
-                              n_level: int = 1, 
-                              sampling_rate_ms: float = 1000):
-        """
-        Set the configuration for standard thermohygrometers, with n vertical 
-        levels. For each level (identified by the number i) two
-        variable are expected: AirTC{i}, air temperature and RH{i}, air relative 
-        humidity. Standard slow termoigrometers (1Hz samplig rate)
-        generate measures with one/two decimal digits, so the database
-        type for these measure can be DECIMAL(5,2), to save space. 
-        Set the sampling rate for this type of measure.
-
-        Attributes:
-            n_levels: number of vertical levels or number of termoigrometers,
-                      recorded in the same file.
-            sampling_rate_ms: milliseconds between two measure. Default 1s (1Hz).
-        """
-        if n_level <= 0:
-            raise ValueError("Number of level/instruments must be non zero and positive.")
-        if not isinstance(n_level, int):
-            raise TypeError("Number of level/instruments must be an int.")
-        
-        cols_trh = {}
-
-        #for i in range(1, n_levels + 1):
-        i = n_level
-        cols_trh["TIMESTAMP"] = ('datetime64[ms]', "datetime", "DATETIME PRIMARY KEY")
-        cols_trh[f"AirTC{i}"] = (float, f"t", "DECIMAL(5,2)")
-        cols_trh[f"RH{i}"] = (float, f"rh", "DECIMAL(5,2)")
-
-        return cls(
-            cols = cols_trh,
-            sampling_rate_ms = sampling_rate_ms
-        )
-
-    @classmethod
-    def defaultStatus(cls, sampling_rate_ms: float = 1000):
-        """
-        Set the configuration to read the status files. They contain info
-        about the status of the station, for example a Campbell datalogger. 
-        Here an example with battery voltage and info about the SD card
-        where files are stored. Set the sampling rate for this type of measure.
-
-        Attributes:
-            sampling_rate_ms: milliseconds between two measure. Default 1s (1Hz).
-        """
-        cols_status = {
-            "TIMESTAMP" : ('datetime64[ms]', "datetime", "DATETIME PRIMARY KEY"),
-            "BattV_Min": (float, "battVmin", "DECIMAL(5,2)"),
-            "CardStatus": (str, "card_status", "VARCHAR(10)")
-        }
-
-        return cls( 
-            cols = cols_status,
-            sampling_rate_ms = sampling_rate_ms
-        )
-    
     def get_file_cols_name(self) -> List[str]:
         """
-        Return a list with the input file column names.
+        Return a list with the column names of the input file.
         """
         return list(self.cols.keys())
     

@@ -44,7 +44,7 @@ class TestInputFileConfig:
         WHEN: use the gillwindmaster() method with custom parameters
         THEN: verify that the returned InputFileConfig object has the correct parameters
         """
-        config = InputFileConfig.gillwindmaster(n_level=2, sampling_rate_ms=100)
+        config = InputFileConfig.gillwindmaster(level_n=2, sampling_rate_ms=100)
 
         # verify correct sampling rate
         assert config.sampling_rate_ms == 100
@@ -91,7 +91,7 @@ class TestInputFileConfig:
         WHEN: use the Thermohygrometer method with custom parameters
         THEN: verify that the returned InputFileConfig object has the correct parameters
         """
-        config = InputFileConfig.defaultThermohygrometer(n_level=3, sampling_rate_ms=2000)
+        config = InputFileConfig.defaultThermohygrometer(level_n=3, sampling_rate_ms=2000)
 
         # verify correct sampling rate
         assert config.sampling_rate_ms == 2000
@@ -230,21 +230,21 @@ class TestInputFileConfig:
         WHEN: use the gillwindmaster() method with wrong parameters
         THEN: verify that the method raises the correct exceptions
         """
-        # n_level is zero
+        # level_n is zero
         with pytest.raises(ValueError, match="non zero and positive"):
-            InputFileConfig.gillwindmaster(n_level=0)
+            InputFileConfig.gillwindmaster(level_n=0)
 
-        # n_level is negative
+        # level_n is negative
         with pytest.raises(ValueError, match="non zero and positive"):
-            InputFileConfig.gillwindmaster(n_level=-1)
+            InputFileConfig.gillwindmaster(level_n=-1)
 
-        # n_level is a string
+        # level_n is a string
         with pytest.raises(TypeError, match="must be an int"):
-            InputFileConfig.gillwindmaster(n_level="1")
+            InputFileConfig.gillwindmaster(level_n="1")
 
-        # n_level is a float
+        # level_n is a float
         with pytest.raises(TypeError, match="must be an int"):
-            InputFileConfig.gillwindmaster(n_level=1.5)
+            InputFileConfig.gillwindmaster(level_n=1.5)
 
     def test_rotated_wind_invalid_type(self):
         """
