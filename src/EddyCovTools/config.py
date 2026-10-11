@@ -1,6 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, List
 
@@ -14,6 +13,11 @@ class InputFileConfig:
     with the correspondingcolumn in the database table.
     The file is imported in a Pandas dataframe, then the dataframe is imported 
     in a database table.
+    Normally one InputFileConfig object correponds to one instrument.
+    If one file contains data from multiple vertical levels or instruments, 
+    you can create one InputFileConfig object for each instrument/level. In this way
+    you can split the data in multiple database tables, one for each instrument.
+    This behavior allows memory to be saved during processing operations.
 
     If you want to import a column from a file, you have to insert: 
     * the column info as a new entry in the dictionary named cols
@@ -240,7 +244,11 @@ class InputFileConfig:
     
     def get_file_cols_name(self) -> List[str]:
         """
-        Return a list with the column names of the input file.
+        Returns
+        -------
+        List[str]
+            Return a list with the column names of the input file that will
+            be imported.
         """
         return list(self.cols.keys())
     
@@ -249,8 +257,11 @@ class InputFileConfig:
         Return a dictionary that maps the input file column name with 
         its type.
 
-        Key: column name in the input file,
-        Value: pandas type of the column.
+        Returns
+        -------
+        Dict[str, str]
+            Keys: the column names in the input file to be imported,
+            Values: the pandas types of the columns.
         """
         dict = {}
         for key, value in self.cols.items():
@@ -259,11 +270,14 @@ class InputFileConfig:
     
     def get_table_cols_name(self) -> Dict[str, str]:
         """
-        Return a dictionary that maps the input file column name with 
-        the column name in the database table.
+        Return a dictionary that maps the input file column names with 
+        the column names in the database table.
 
-        Key: column name in the input file,
-        Value: column name in the database table.
+        Returns
+        -------
+        Dict[str, str]
+            Keys: the column names in the input file to be imported,
+            Values: the names the columns should have in the database table.
         """
         dict = {}
         for key, value in self.cols.items():
@@ -273,10 +287,13 @@ class InputFileConfig:
     def get_table_cols_type(self) -> Dict[str, str]:
         """
         Return a dictionary that maps the column name in the database table 
-        with its SQL type. 
+        with its SQL type.
 
-        Key: column name in the database table,
-        Value: column SQL type in the database table.
+        Returns
+        -------
+        Dict[str, str]
+            Keys: the column names in the database table,
+            Values: the column SQL types in the database table.
         """
         dict = {}
         for value in self.cols.values():
@@ -286,47 +303,111 @@ class InputFileConfig:
 @dataclass
 class StationConfig:
     """
-    Configuration parameters for a single station, identified by station_name,
-    for example the serial number of a Campbell datalogger.
-    The aim is use this class to contains all the info about the station data
-    and related files.
+    This class rappresent one measurment point; for example a sonic anemometer,
+    a thermohygrometer and a barometer installed in the same place.
+    Different locations or different vertical levels can be represented by 
+    different StationConfig objects. 
+    
+    One StationConfig object contains all the info about the station 
+    and related data files (InputFileConfig objects):
+    * The name of the measurement point, a longer description
+    * The id of the measurement point, with no space
+    * The informations about the instruments installed in the same place,
+      and how to retrieve data from the related files.
 
-    You can add to a single station multiple InputFileConfig (one for each type
-    of input file), using add_input_file_config() method. You have to specify:
-    1) An ID that identify the type of input file (e.g. sonic, slow, stat)
-    2) A dictionary that associates the config_id and the name of the database table,
-       which will contain data from all files of the same type
-    3) A dictionary that associates the config_id and the pattern filename in
-       all file names of the same type (e.g. S*.dat or *2026-05-10*)
+    A measurment point could have multiple instruments.
+    You can add to a single StationConfig object multiple InputFileConfig, one for 
+    each instruments, using add_input_file_config() method. You have to specify:
+    1) An ID that identify the single instrument (e.g. sonic, slow, status)
+    2) The InputFileConfig object, which handles the conversion of data from a file 
+       to a database table
+    3) A wildcard pattern contained in all file names of the same instrument,
+       (e.g. S*.dat or *2026-05-10*). The input files are searched using this pattern
+    4) The name of the database table, which will contain data from the single instrument
+    These information are stored in three dictionaries, with the config_id as key and the
+    InputFileConfig object, the pattern and the table name as values.
 
-    Attributes:
-        station_name: name of the station, longer description
-        station_id: id of the station, with no space
-        db_table_names: dict with config_id as key and database table name as value
-        input_files_name: dict with config_id as key and substring as value. The substring
-          must be contained in all file names related to the same InputFileConfig object,
-          it is used to select the files to import
-        input_files_config: dict with config_id as key and InputFileConfig as value
+    See examples below.
+
+    Attributes
+    ----------
+    station_name : str
+        The name of the measurement point, a longer description
+    station_id : str
+        The id of the measurement point, with no space
+    input_files_config : Dict[str, 'InputFileConfig']
+        A dictionary that associates the config_id and the InputFileConfig object
+    db_table_names : Dict[str, str]
+        A dictionary that associates the config_id and the name of the database table,
+        which will contain data from all files of the same type
+    input_files_name : Dict[str, str]
+        A dictionary that associates the config_id and the pattern filename in
+        all file names of the same type (e.g. S*.dat or *2026-05-10*)
+
+    Examples
+    --------
+    .. code-block:: python
+        # select the columns to be imported from the input file of an instrument
+        # create the corresponding columns in the database table
+        cols_mapping_instr_1 = {
+            "col_A": (int, "db_col_A", "INTEGER"),
+            "col_B": (float, "db_col_B", "DECIMAL(5,2)")
+        }
+        instrum_1 = InputFileConfig(sampling_rate_ms=1000, cols=cols_mapping_instr_1)
+        # create a second instrument file config
+        instrum_2 = InputFileConfig.gillwindmaster(level_n=1, sampling_rate_ms=50) 
+    
+        # collect all the instrument in one StationConfig object
+        station = StationConfig(
+            station_name = "my_station_level_1",
+            station_id = "id_l1",
+            input_files_config = {
+                "slow_sensor": instrum_1,
+                "wind": instrum_2
+            },
+            db_table_names={
+                "slow_sensor": "table_slow_sensor", 
+                "wind": "table_wind"
+            },
+            input_files_name = {
+                "slow_sensor": "*slow*", 
+                "wind": "*wind*"
+            },
+        )
     """
     station_name: str
     station_id: str
+    input_files_config: Dict[str, 'InputFileConfig'] = field(default_factory=dict)
     db_table_names: Dict[str, str] = field(default_factory=dict)
     input_files_name: Dict[str, str] = field(default_factory=dict)
-    input_files_config: Dict[str, 'InputFileConfig'] = field(default_factory=dict)
 
-    def add_input_file_config(self, config_id: str, config: 'InputFileConfig', db_table_name: str, input_files_name: str):
+    def add_input_file_config(self, 
+                              config_id: str, 
+                              config: 'InputFileConfig', 
+                              db_table_name: str, 
+                              input_files_name: str):
         """
-        Add new InputFileConfig object to the station.
-        One config for each type of files generated from the station.
+        Add new instrument configuration to the station.
+        You have to specify:
+        1) An ID that identify the single instrument (e.g. sonic, slow, status)
+        2) The InputFileConfig object, which handles the conversion of data from a file 
+           to a database table
+        3) A wildcard pattern contained in all file names of the same instrument,
+           (e.g. S*.dat or *2026-05-10*). The input files are searched using this pattern
+        4) The name of the database table, which will contain data from the single instrument
 
-        Attributes:
-            config_id: id of the input configuration files
-            config: InputFileConfig object contains column info
-            db_table_name: name of the database table, which will contain 
-                           data from all files of the same type
-            input_files_name: a wildcard pattern contained in all file names that 
-                              match the stucture described in the config object
-                              (e.g. S*.dat or *2026-05-10*)
+        Parameters
+        ----------
+        config_id : str
+            The id identify the single instrument inside the station
+        config : InputFileConfig
+            The InputFileConfig object containing column info
+        db_table_name : str
+            The name of the database table, which will contain 
+            data from all files of the same instrument
+        input_files_name : str
+            A wildcard pattern contained in all file names of the instrument
+            (e.g. S*.dat or *2026-05-10*)
         """
         self.input_files_config[config_id] = config
         self.db_table_names[config_id] = db_table_name
@@ -334,23 +415,29 @@ class StationConfig:
 
     def get_configs(self) -> Dict[str, 'InputFileConfig']:
         """
-        Get dictionary contains all InputFileConfig object
+        Get a dictionary contains all the InputFileConfig object of the station
+
+        Returns
+        -------
+        Dict[str, InputFileConfig]
+            A dictionary with the instrument config id as key, 
+            and the InputFileConfig object as value.
         """
         return self.input_files_config
 
     def get_input_config(self, config_id) -> InputFileConfig:
         """
-        Get one InputFileConfig object given its config id.
+        Get one InputFileConfig object of the station given its instrument id.
 
         Parameters
         ----------
         config_id : str
-            The id of the configuration to return.
+            The id of the instrument.
 
         Returns
         -------
         InputFileConfig
-            The configuration associated with config_id.
+            The file input configuration associated with the instrument id.
 
         Raises
         ------
@@ -361,22 +448,45 @@ class StationConfig:
     
     def get_table_name(self, config_id):
         """
-        Get the name of the table in the database, 
-        given the the indetifier of the input config.
+        Get the name of the instrument table in the database, 
+        given its instrument id.
 
-        Attributes:
-            config_id: the id of the configuration
+        Parameters
+        ----------
+        config_id : str
+            The id of the instrument.
+
+        Returns
+        -------
+        str
+            The name of the database table associated with the instrument id.
+            All the measurements of the instrument will be stored in this table.
+
+        Raises
+        ------
+        KeyError
+            If config_id is not present in the station configurations.
         """
         return self.db_table_names[config_id]
     
     def get_input_file_name(self, config_id) -> str:
         """
-        Get the substring the file names must contains, to be imported, 
-        given the the indetifier of the input config.
+        Get the wildcard pattern contained in all file names of the instrument,
+        to be imported, given its instrument id.
 
-        Attributes:
-            config_id: the id of the configuration
+        Parameters
+        ----------
+        config_id : str
+            The id of the instrument.
 
-        
+        Returns
+        -------
+        str
+            The wildcard pattern contained in all file names of the instrument.
+
+        Raises
+        ------
+        KeyError
+            If config_id is not present in the station configurations.
         """
         return self.input_files_name[config_id]
