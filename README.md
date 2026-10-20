@@ -14,12 +14,6 @@ Install using
 python3 -m pip install EddyCovTools
 ```
 
-If you want to investigate the TOB3 file converter, use
-```bash
-git submodule update --init --recursive
-```
-to get my fork.
-
 This repo is a work in progress.
 
 Required:

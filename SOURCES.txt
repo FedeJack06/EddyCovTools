@@ -1,0 +1,9 @@
+EddyCovTools/__main__.py
+EddyCovTools/__version__.py 
+EddyCovTools/__init__.py
+EddyCovTools/config.py
+EddyCovTools/db_tools.py
+EddyCovTools/file_manager.py 
+EddyCovTools/frame.py
+EddyCovTools/pre_processing.py 
+EddyCovTools/utils.py

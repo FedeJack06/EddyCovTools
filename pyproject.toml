@@ -1,6 +1,8 @@
 [build-system]
-requires = ["hatchling >= 1.26"]
-build-backend = "hatchling.build"
+requires = [
+  'setuptools>=42',
+]
+build-backend = 'setuptools.build_meta'
 
 [project]
 name = "EddyCovTools"
@@ -22,8 +24,8 @@ dependencies = [
     "pandas",
     "matplotlib",
     "duckdb",
-    "campbell-files",
-    "natsort"
+    "natsort",
+    "scipy"
 ]
 
 [project.urls]
