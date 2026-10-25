@@ -1,7 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
-import logging
 import duckdb as db
 import pandas as pd
 from typing import Dict, List
@@ -9,9 +7,11 @@ from pathlib import Path
 from .config import InputFileConfig, StationConfig
 from .file_manager import get_files_from_station, toa5_to_df
 
+import logging
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
-def df_to_db(con: db.DuckDBPyConnection, 
+'''def df_to_db(con: db.DuckDBPyConnection, 
              df_in: pd.DataFrame, 
              db_table: str, 
              map_df_db_cols: Dict[str, str] = None) -> tuple[int, int]:
@@ -21,6 +21,8 @@ def df_to_db(con: db.DuckDBPyConnection,
     in the dataframe and the column names in the table.
     If you don't pass the relation, the table and df must
     have the same column name.
+    If df has index named "datetime", reset index is performed and 
+    "datetime" became a column.
 
     Parameters
     ----------
@@ -41,6 +43,8 @@ def df_to_db(con: db.DuckDBPyConnection,
     int:
         Number of skipped rows: difference between df rows and inserted rows
     """
+    if df_in.index.name == "datetime":
+        df_in = df_in.reset_index()
 
     if map_df_db_cols is not None:
         #put the column name in the dataframe and in the table in two list
@@ -67,7 +71,141 @@ def df_to_db(con: db.DuckDBPyConnection,
 
     skipped = len(df_in) - inserted_rows
 
-    return inserted_rows, skipped
+    return inserted_rows, skipped'''
+
+def _get_pk(con, db_table: str) -> str:
+    """
+    Return the name of the primary key column of a table.
+
+    Returns
+    -------
+    str
+        Name of the primary key column.
+
+    Raises
+    ------
+    ValueError
+        If the table has no primary key, or a composite one.
+    """
+    pk = [r[0] for r in con.execute(
+        f"SELECT name FROM pragma_table_info('{db_table}') WHERE pk"
+    ).fetchall()]
+    if len(pk) != 1:
+        raise ValueError(
+            f"Table '{db_table}' must have exactly one primary key column, found: {pk}"
+        )
+    return pk[0]
+
+def df_to_db(con: db.DuckDBPyConnection, 
+               df_in: pd.DataFrame, 
+               db_table: str, 
+               map_df_db_cols: Dict[str, str] = None, 
+               overwrite: bool = False) -> tuple[int, int]:
+    """
+    Insert a Pandas DataFrame into a DuckDB table.
+
+    The DataFrame may contain only a subset of the table columns. Columns of
+    the table that are not in the DataFrame are left to their default value
+    on new rows, and untouched on updated rows.
+
+    You can specify a relation between the column names 
+    in the dataframe and the column names in the table.
+    If you don't pass the relation, the table and df must
+    have the same column name.
+
+    If the DataFrame index is named (e.g. "datetime"), it is converted into
+    a column. An unnamed index (e.g. the default RangeIndex) is ignored.
+
+    Parameters
+    ----------
+    con: db.DuckDBPyConnection
+        Connection to the database.
+    df_in: pd.DataFrame
+        The DataFrame to insert. It must contain the primary key column of
+        the table (possibly as a named index), with no repeated values.
+    db_table: str
+        Name of the table to fill. It must have exactly one primary key column.
+    map_df_db_cols: Dict[str, str], optional
+        Map from DataFrame column names (keys) to table column names (values).
+        Only the DataFrame columns listed in the map are inserted, and all of
+        them must exist in the DataFrame. If the key is a named index, include
+        it in the map as well (e.g. {"datetime": "datetime", ...}).
+        If None, DataFrame and table columns are matched by name.
+    overwrite: bool, default False
+        How to handle rows whose primary key already exists in the table.
+        If False, they are skipped. If True, they are updated, only on the
+        columns present in the DataFrame.
+
+    Returns
+    -------
+    int
+        Number of rows written by the INSERT statement:
+        - overwrite=False: rows actually inserted.
+        - overwrite=True: inserted rows plus updated rows.
+    int
+        Number of skipped rows, i.e. DataFrame rows minus the first value:
+        - overwrite=False: rows whose key was already in the table.
+        - overwrite=True: always 0.
+
+    Raises
+    ------
+    ValueError
+        - If the table does not have exactly one primary key column.
+        - If the primary key column is not among the DataFrame columns
+          (e.g. the index holding it is unnamed, or it is missing from the map).
+        - If the primary key column has repeated values in the DataFrame.
+        - If overwrite=True and the DataFrame contains only the key column.
+    KeyError
+        If a key of `map_df_db_cols` is not a column of the DataFrame.
+    db.BinderException
+        If a DataFrame column (after mapping) does not exist in the table.
+    db.ConstraintException
+        If the insert violates a table constraint other than the primary key
+        (e.g. NOT NULL on a column, or a NULL in the key column).
+
+    Notes
+    -----
+    Nothing is written if any check fails. NaN values in the DataFrame
+    overwrite existing values when overwrite=True.
+    """
+    # duckdb ignore the df index, duck db reads only df columns
+    # if df has a custom index with a name, convert it in a df column
+    if any(n is not None for n in df_in.index.names):
+        df_in = df_in.reset_index()
+
+    # rename the df columns into the corrisponding names in the table
+    if map_df_db_cols is not None:
+        df_in = df_in[list(map_df_db_cols)].rename(columns=map_df_db_cols)
+
+    # check if the primary key of table is present in the df columns
+    key = _get_pk(con, db_table)
+    if key not in df_in.columns:
+        raise ValueError(
+            f"Primary key column '{key}' of table '{db_table}' not found in the dataframe"
+            f" (columns: {list(df_in.columns)}). Maybe the index is unnamed."
+        )
+
+    # chack if there are two df rows with the same index (e.g same datetime)
+    if df_in[key].duplicated().any():
+        raise ValueError(f"Duplicated values in key column '{key}' within the dataframe.")
+
+    # build the action ON CONFLICT of the query
+    if overwrite:
+        sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in df_in.columns if c != key)
+        if not sets:
+            raise ValueError("overwrite=True but the dataframe contains only the key column: nothing to update")
+        action = f"({key}) DO UPDATE SET {sets}"
+    else:
+        action = "DO NOTHING"
+
+    # generic insert query by name: if a df column not in table -> db Binder Error
+    # if a table column not in df -> table column left with his default value
+    n = con.execute(
+        f"INSERT INTO {db_table} BY NAME SELECT * FROM df_in ON CONFLICT {action}"
+    ).fetchone()[0]
+
+    # return the number of inserted rows, and number of skipped rows
+    return n, len(df_in) - n
 
 def fill_db_toa5(con: db.DuckDBPyConnection, 
                  db_table: str, 
@@ -239,29 +377,49 @@ def table_to_df_dates(db_path: str | Path,
     return _db_df(db_path, table, query, params)
 
 def create_station_db(db_path: str | Path,
-              stations: List[StationConfig]) -> None:
+              stations: List[StationConfig],
+              configs_id: List[str] = None) -> None:
     """
     Create a database structure with tables for each station
     as described in the configuration objects.
     """
     db_path = Path(db_path)
 
-    with db.connect(db_path) as con:
-        for station in stations:
-            for config_id, config in station.get_configs().items():
-                table_name = station.get_table_name(config_id)
-                cols_type = config.get_table_cols_type()
-                cols_query = ", ".join(f"{k} {v}" for k, v in cols_type.items())
-                query = f"""
-                    CREATE TABLE IF NOT EXISTS {table_name} (
-                        {cols_query}
-                    )
-                """
-                try:
-                    con.execute(query)
-                    logger.info(f"Table created (or already exists): {table_name}")
-                except db.Error as e:
-                    logger.error(f"Error creating {table_name}: {e}")
+    if configs_id == None: # all configuration
+        with db.connect(db_path) as con:
+            for station in stations:
+                for config_id, config in station.get_configs().items():
+                    table_name = station.get_table_name(config_id)
+                    cols_type = config.get_table_cols_type()
+                    cols_query = ", ".join(f"{k} {v}" for k, v in cols_type.items())
+                    query = f"""
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            {cols_query}
+                        )
+                    """
+                    try:
+                        con.execute(query)
+                        logger.info(f"Table created (or already exists): {table_name}")
+                    except db.Error as e:
+                        logger.error(f"Error creating {table_name}: {e}")
+    else:
+        with db.connect(db_path) as con:
+            for station in stations:
+                for config_id in configs_id:
+                    config = station.get_input_config(config_id)
+                    table_name = station.get_table_name(config_id)
+                    cols_type = config.get_table_cols_type()
+                    cols_query = ", ".join(f"{k} {v}" for k, v in cols_type.items())
+                    query = f"""
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            {cols_query}
+                        )
+                    """
+                    try:
+                        con.execute(query)
+                        logger.info(f"Table created (or already exists): {table_name}")
+                    except db.Error as e:
+                        logger.error(f"Error creating {table_name}: {e}")
 
 def create_flux_table(conn, table_name):
     """
@@ -301,8 +459,72 @@ def create_flux_table(conn, table_name):
         "sigT DOUBLE",
         "ustar DOUBLE",
         "TKE DOUBLE",
+        "L DOUBLE"
     ]
     
     cols_def = ", ".join(cols)
     conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_def})")
+
+def multi_db_table_to_df_dates(db_paths: List[str | Path],
+                               table: str,
+                               dates: List[tuple],
+                               orderby: str = "1 ASC") -> pd.DataFrame:
+    """
+    Get a dataframe from a table spanning multiple database files, 
+    filtered by date intervals.
+    """
+    con = db.connect(":memory:")
+    
+    # 1. Attacca tutti i database validi
+    selects = []
+    for idx, db_path in enumerate(db_paths):
+        path_obj = Path(db_path)
+        if not path_obj.exists():
+            logger.warning(f"Database ignorato (non trovato): {path_obj}")
+            continue
+            
+        alias = f"db_{idx}"
+        con.execute(f"ATTACH '{path_obj}' AS {alias} (READ_ONLY)")
+        selects.append(f"SELECT * FROM {alias}.{table}")
+        
+    if not selects:
+        raise FileNotFoundError("Nessun database valido trovato tra i percorsi forniti.")
+        
+    # 2. Crea la vista unificata
+    con.execute(f"CREATE TEMP VIEW all_data AS {' UNION ALL '.join(selects)}")
+    
+    # 3. Costruisci i filtri temporali
+    conditions = " OR ".join(["(datetime BETWEEN ? AND ?)"] * len(dates))
+    query = f"SELECT * FROM all_data WHERE {conditions} ORDER BY {orderby}"
+    
+    # Appiattisce la lista di tuple [(start1, end1), (start2, end2)]
+    params = [date for interval in dates for date in interval]
+    
+    # 4. Esegue la query e indicizza
+    df = con.execute(query, params).df()
+    
+    if 'datetime' in df.columns:
+        df = df.set_index('datetime', drop=True)
+    else:
+        logger.warning(f"Colonna 'datetime' non trovata in {table}, indice default.")
+
+    """db_path = Path(db_path)
+        with db.connect(db_path) as con:
+            # get table metadata, one row for each column info
+            table_info = con.execute(f"PRAGMA table_info({table})").df()
+            # pk column = 1 if is primary key. List of name of pk column
+            pk_cols = (table_info[table_info["pk"] > 0].sort_values("pk")["name"].tolist())
+    
+            df = con.execute(query, params or []).df()
+    
+        # if found pk column
+        if pk_cols:
+            # index or multindex based on pk column finded
+            # drop column index
+            df = df.set_index(pk_cols if len(pk_cols) > 1 else pk_cols[0], drop=True)
+        else:
+            logger.warning(f"No PRIMARY KEY found in {table}, default index in df")
+    """
+        
+    return df
         
