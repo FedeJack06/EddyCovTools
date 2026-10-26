@@ -7,8 +7,6 @@ from natsort import natsorted
 from .config import InputFileConfig, StationConfig
 import logging
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
-
 
 def toa5_to_df(input_file : str | Path,
                config: InputFileConfig,
@@ -150,7 +148,7 @@ def get_files_pattern(folder_path: str | Path,
     else:
         files = [f for f in folder.glob(pattern) if f.is_file()]
     
-    logger.info(f"Found {len(files)} files matching '{pattern}' in {folder}.")
+    logger.info("Found %d files matching '%s' in %s.", len(files), pattern, folder)
     return files
 
 def get_files_from_station(folder_path: str | Path, 
@@ -196,6 +194,9 @@ def get_files_from_station(folder_path: str | Path,
         substring = station.get_input_file_name(config_id)
         #get the list of files of the same type (the same input config)
         list_of_file = get_files_pattern(folder_path=folder_path, pattern=substring)
+        if not list_of_file:
+            logger.warning("No files found for config '%s' with pattern '%s' in %s",
+                           config_id, substring, folder_path)
         #output
         dict_files[config_id] = list_of_file
 

@@ -10,7 +10,6 @@ from .file_manager import toa5_to_df, get_files_pattern
 from .config import InputFileConfig
 import logging
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 '''
 Scelte da conoscere
@@ -22,10 +21,45 @@ Efficienza: l’interpolazione è vettoriale e costa poco rispetto alla rolling.
 '''
 
 
-def hor_wind_speed(u, v):
+def hor_wind_speed(u: float | pd.Series, 
+                   v: float | pd.Series) -> float | pd.Series:
+    """
+    Calculate the horizontal wind speed
+
+    Parameters
+    ----------
+    u: float | pd.Series
+        first horizonatal wind component.
+    v: float | pd.Series
+        second horizonatal wind component.
+
+    Returns
+    -------
+    float | pd.Series
+        The horizontal wind speed.
+    """
     return np.sqrt(u**2 + v**2)
 
-def module_wind_speed(u, v, w):
+def module_wind_speed(u: float | pd.Series, 
+                      v: float | pd.Series, 
+                      w: float | pd.Series) -> float | pd.Series:
+    """
+    Calculate the 3D wind speed.
+    
+    Parameters
+    ----------
+    u: float | pd.Series
+        first horizonatal wind component.
+    v: float | pd.Series
+        second horizonatal wind component.
+    w: float | pd.Series
+        vertical wind component.
+    
+    Returns
+    -------
+    float | pd.Series
+        The 3D wind speed.
+    """
     return np.sqrt(u**2 + v**2 + w**2)
 
 def true_wind_dir(u, 
@@ -112,7 +146,7 @@ def check_df(df: pd.DataFrame,
         return row_with_gaps, nan_df, duration_nan
     
     else:
-        logger.error("Empty dataframe.")
+        logger.warning("Empty dataframe passed to check_df.")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
 def fill_gaps_nan(df: pd.DataFrame,
@@ -445,7 +479,7 @@ def check_TOA5(input_dir : str | Path,
             df, meta = toa5_to_df(input_file=file, config=config, date_index=True)
 
             if df.empty:
-                logger.error(f"Analyzing {file.name}: empty file, skipping...")
+                logger.warning("Analyzing %s: empty file, skipping...", file.name)
                 continue
             
             # Comparison between last timestamp in previous file and first timestamp of current file
@@ -465,7 +499,7 @@ def check_TOA5(input_dir : str | Path,
                         })
                         df_gaps_list.append(row)
                 else:
-                    logger.error(f"Analyzing {file.name}: Missing timestamp between consecutive files")
+                    logger.error("Analyzing %s: Missing timestamp between consecutive files", file.name)
             
             # Calc dt in milliseconds between rows in file
             delta_t = df.index.diff().total_seconds() * 1000
@@ -481,7 +515,7 @@ def check_TOA5(input_dir : str | Path,
                             "TIMESTAMP": df.index[delta_t > sampling_rate]
                         })
                 df_gaps_list.append(row_with_gaps)
-                logger.info(f"Analyzing {file.name}: Found {len(row_with_gaps)} rows with delta t > {sampling_rate} ms")
+                logger.info("Analyzing %s: Found %d rows with delta t > %.1f ms", file.name, len(row_with_gaps), sampling_rate)
             
             # Find rows with at least one NAN
             nan_df = df[df.eq('NAN').any(axis=1)]
@@ -493,31 +527,31 @@ def check_TOA5(input_dir : str | Path,
             last_file = file
 
         except Exception as e:
-            logger.error(f"Analyzing {file.name} Error: {e}")
+            logger.error("Analyzing %s Error: %s", file.name, e)
 
     # Output of the results
     info = meta[0].strip().split('","')
     # Build df
     if df_gaps_list:
         df_gaps = pd.concat(df_gaps_list, ignore_index=True)
-        logger.info(f"{'='*60}")
-        logger.info(f"TOTAL: {len(df_gaps)} rows with delta t > {sampling_rate} ms (include gaps between files)")
-        logger.info(f"{'='*60}\n")
+        logger.info("%s", '='*60)
+        logger.info("TOTAL: %d rows with delta t > %.1f ms (include gaps between files)", len(df_gaps), sampling_rate)
+        logger.info("%s\n", '='*60)
         logger.info(df_gaps)
         # result in a file named time_gaps
         if out_file:
             out_path = input_dir / Path(f'time_gaps_{info[1]}_{info[7][:-1]}.csv')
             df_gaps.to_csv(out_path, index=False)
     else:
-        logger.info(f"{'='*60}")
+        logger.info('='*60)
         logger.info("No time gaps found.")
-        logger.info(f"{'='*60}\n")
+        logger.info("%s\n", '='*60)
         df_gaps = pd.DataFrame()
 
     if df_nan_list:
         df_nan = pd.concat(df_nan_list, ignore_index=True)
-        logger.info(f"{'='*60}")
-        logger.info(f"TOTAL: {len(df_nan)} rows with NAN values")
+        logger.info("="*60)
+        logger.info("TOTAL: %d rows with NAN values", {len(df_nan)})
         logger.info("="*60 + "\n")
         logger.info(df_nan)
         # result in a file named nan_
@@ -525,9 +559,9 @@ def check_TOA5(input_dir : str | Path,
             out_path = input_dir / Path(f'nan_{info[1]}_{info[7][:-1]}.csv')
             df_nan.to_csv(out_path, index=False)
     else:
-        logger.info(f"{'='*60}")
+        logger.info("="*60)
         logger.info("No NAN values found")
-        logger.info(f"{'='*60}\n")
+        logger.info("="*60 + "\n")
         df_nan = pd.DataFrame()
 
     return df_gaps, df_nan

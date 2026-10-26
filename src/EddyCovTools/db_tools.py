@@ -6,10 +6,8 @@ from typing import Dict, List
 from pathlib import Path
 from .config import InputFileConfig, StationConfig
 from .file_manager import get_files_from_station, toa5_to_df
-
 import logging
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 '''def df_to_db(con: db.DuckDBPyConnection, 
              df_in: pd.DataFrame, 
@@ -88,7 +86,7 @@ def _get_pk_cols(con: db.DuckDBPyConnection,
     ).fetchall()
     return [r[0] for r in rows]
 
-def _get_pk(con: db.DuckDBPyConnection, 
+def _get_pk(con: db.DuckDBPyConnection,
             db_table: str) -> str:
     """
     Return the name of the primary key column of a table.
@@ -147,9 +145,10 @@ def _set_df_index(df: pd.DataFrame,
     The function does not sort the rows nor check that the index is unique:
     the order is the one of the input dataframe.
     """
-    if pk_cols:
+    if pk_cols: # if one or more pk found, index df by first pk
         return df.set_index(pk_cols if len(pk_cols) > 1 else pk_cols[0], drop=True)
-    logger.warning(f"No PRIMARY KEY found in {table}, default index in df")
+    # no pk found
+    logger.warning("No PRIMARY KEY found in %s, default index in df", table)
     return df
 
 def _drop_duplicate_keys(df: pd.DataFrame, 
@@ -198,13 +197,13 @@ def _drop_duplicate_keys(df: pd.DataFrame,
 
     n_dup_rows = df.duplicated().sum() # find duplicate rows
     logger.warning(
-        f"{n_dup_keys} duplicated keys {pk_cols} in {table} across the databases, "
-        f"only the first row for each key is kept."
+        "%i duplicated keys %s in %s across the databases, "
+        "only the first row for each key is kept.", n_dup_keys, pk_cols, table
     )
     if n_dup_rows != n_dup_keys: # duplicate key but different row values
         logger.warning(
-            f"{n_dup_keys - n_dup_rows} duplicated keys have DIFFERENT record values "
-            f"the row kept is arbitrary using `keep='first'`."
+            "%i duplicated keys have DIFFERENT record values "
+            "the row kept is arbitrary using `keep='first'`.", {n_dup_keys - n_dup_rows}
         )
     return df.drop_duplicates(subset=pk_cols, keep="first")
 
@@ -342,21 +341,27 @@ def fill_db_toa5(con: db.DuckDBPyConnection,
         configuration file input, with all the info about the 
         columns to be inported.
     """
+    #get the dictiocary that link the column name in the dataframe
+    #and the column name in the table
+    col_map = config.get_table_cols_name()
+
     for file in file_list:
-        df, header = toa5_to_df(file, config=config)
-
-        #get the dictiocary that link the column name in the dataframe
-        #and the column name in the table
-        map = config.get_table_cols_name()
-
         try:
+            # convert TOA5 file to Pandas DataFrame
+            df, _ = toa5_to_df(file, config=config)
             #insert entire dataframe into the table
-            inserted_rows, skipped_rows = df_to_db(con=con, df_in=df, db_table=db_table, map_df_db_cols=map)
-            logger.info(f"{file.name}: Query OK, {inserted_rows} row(s) affected")
-            if skipped_rows > 0:
-                logger.warning(f"Warning on {file.name}: {skipped_rows} duplicate row(s) skipped, {inserted_rows} inserted.")
-        except db.Error as e:
-            logger.error(f"Error importing file: {file.name}: {e}")
+            inserted, skipped = df_to_db(con=con, 
+                                         df_in=df, 
+                                         db_table=db_table, 
+                                         map_df_db_cols=col_map)
+            logger.info("%s: %d row(s) inserted, %d skipped",
+                        file.name, inserted, skipped)
+
+            if skipped > 0:
+                logger.warning("%s: %d duplicate row(s) skipped",
+                               file.name, skipped)
+        except Exception as e:
+            logger.error("%s: import failed: %s", file.name, e)
 
 def fill_db_station_toa5(con: db.DuckDBPyConnection, 
                     station: StationConfig, 
@@ -388,6 +393,7 @@ def fill_db_station_toa5(con: db.DuckDBPyConnection,
     all_station_files = get_files_from_station(input_dir, station, configs)
 
     for config_id, file_list in all_station_files.items():
+        logger.debug("Filling db with files from %s configuration", config_id)
         #get the InputFileConfig object based on its id
         config = station.get_input_config(config_id)
         #get the database table name associated with this input config
@@ -658,7 +664,7 @@ def create_station_db(db_path: str | Path,
     """
     db_path = Path(db_path)
 
-    if configs_id == None: # all configuration
+    if configs_id is None: # all configuration
         with db.connect(db_path) as con:
             for station in stations:
                 for config_id, config in station.get_configs().items():
@@ -672,9 +678,10 @@ def create_station_db(db_path: str | Path,
                     """
                     try:
                         con.execute(query)
-                        logger.info(f"Table created (or already exists): {table_name}")
+                        logger.info("Table created (or already exists): %s", table_name)
                     except db.Error as e:
-                        logger.error(f"Error creating {table_name}: {e}")
+                        logger.error("Error creating table %s: %s", table_name, e)
+                        raise
     else:
         with db.connect(db_path) as con:
             for station in stations:
@@ -690,9 +697,10 @@ def create_station_db(db_path: str | Path,
                     """
                     try:
                         con.execute(query)
-                        logger.info(f"Table created (or already exists): {table_name}")
+                        logger.info("Table created (or already exists): %s", table_name)
                     except db.Error as e:
-                        logger.error(f"Error creating {table_name}: {e}")
+                        logger.error("Error creating table %s: %s", table_name, e)
+                        raise
 
 def create_flux_table(conn, table_name):
     """
@@ -736,4 +744,9 @@ def create_flux_table(conn, table_name):
     ]
     
     cols_def = ", ".join(cols)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_def})")
+    try:
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_def})")
+        logger.info("Flux table created (or already exists): %s", table_name)
+    except db.Error as e:
+        logger.error("Error creating table %s: %s", table_name, e)
+        raise
