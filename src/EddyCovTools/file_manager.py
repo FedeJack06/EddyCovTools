@@ -1,11 +1,14 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
 from pathlib import Path
-import logging
-from typing import List, Dict, Tuple
 import pandas as pd
+from typing import List, Dict, Tuple
 from natsort import natsorted
 from .config import InputFileConfig, StationConfig
-
+import logging
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 
 def toa5_to_df(input_file : str | Path,
                config: InputFileConfig,
@@ -28,7 +31,7 @@ def toa5_to_df(input_file : str | Path,
     date_index: bool
         If true sets the datetime column ("TIMESTAMP") as index and
         removes it from df columns. Default False, so keeps the 
-        default numeric index.
+        default numeric df index.
 
     Returns
     -------
@@ -52,11 +55,7 @@ def toa5_to_df(input_file : str | Path,
     #remove column not specified in the input files configuration
     df = df.filter(items=config.get_file_cols_name())
     #convert the column dtypes to dtypes specified in the config
-    try:
-        df = df.astype(dtype=types, errors='raise')
-    except Exception as e:
-        logger.error(f"Error pandas dtype on file {input_file.name}: {e}")
-        pass
+    df = df.astype(dtype=types, errors='raise')
 
     #set datetime column as index
     if date_index:
@@ -141,24 +140,18 @@ def get_files_pattern(folder_path: str | Path,
     folder = Path(folder_path)
     
     if not folder.exists() or not folder.is_dir():
-        logger.error(f"Error: folder {folder} not found or is not a directory.")
-        return []
+        raise NotADirectoryError(f"Folder {folder} not found or is not a directory.")
 
-    try:
-        # Find only files, based on a wildcard pattern
-        # sorted based on filename
-        if sorted:
-            files = natsorted([f for f in folder.glob(pattern) if f.is_file()], 
-                          key=lambda f: f.name)
-        else:
-            files = [f for f in folder.glob(pattern) if f.is_file()]
-        
-        logger.info(f"Found {len(files)} files matching '{pattern}' in {folder}.")
-        return files
-        
-    except Exception as e:
-        logger.error(f"Error reading folder {folder}: {e}")
-        return []
+    # Find only files, based on a wildcard pattern
+    # sorted based on filename
+    if sorted:
+        files = natsorted([f for f in folder.glob(pattern) if f.is_file()], 
+                        key=lambda f: f.name)
+    else:
+        files = [f for f in folder.glob(pattern) if f.is_file()]
+    
+    logger.info(f"Found {len(files)} files matching '{pattern}' in {folder}.")
+    return files
 
 def get_files_from_station(folder_path: str | Path, 
                            station: StationConfig,
@@ -200,14 +193,11 @@ def get_files_from_station(folder_path: str | Path,
     keys = configs if configs is not None else station.input_files_name.keys()
 
     for config_id in keys:
-        try:
-            substring = station.get_input_file_name(config_id)
-            #get the list of files of the same type (the same input config)
-            list_of_file = get_files_pattern(folder_path=folder_path, pattern=substring)
-            #output
-            dict_files[config_id] = list_of_file
-        except KeyError as e:
-            logger.error(f"Config id error: {e}")
+        substring = station.get_input_file_name(config_id)
+        #get the list of files of the same type (the same input config)
+        list_of_file = get_files_pattern(folder_path=folder_path, pattern=substring)
+        #output
+        dict_files[config_id] = list_of_file
 
     return dict_files
 
