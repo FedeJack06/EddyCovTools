@@ -729,7 +729,7 @@ def despiking_VM97(input_series: pd.Series,
                                max_consecutive_spikes)
         # number of point considered spikes
         n_new = int(spikes_mask.sum())
-        logger.debug("iteration %d: %d spikes identified.", i, n_new)
+        logger.info("iteration %d: %d spikes identified.", i, n_new)
         # if no more spikes found, end the despiking
         if n_new == 0:
             break
