@@ -10,15 +10,20 @@ and the corresponding table are specified in the station configuration.
 Here is an example of two different stations: one with a single vertical measurement level 
 and thus one instrument and one file per type) and one station with two vertical levels.
 """
-
 import duckdb as db
 from pathlib import Path
-from EddyCovTools.utils import setup_logging
 from EddyCovTools.db_tools import fill_db_station_toa5
 from station_config import * # import station configuration
+# always use logging with this library
+import logging
+lib_logger = logging.getLogger("EddyCovTools")
+lib_logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-# create a .log file with all the errors
-setup_logging(__file__)
+info_handler = logging.FileHandler("run.log")
+info_handler.setLevel(logging.INFO)
+info_handler.setFormatter(formatter)
+lib_logger.addHandler(info_handler)
 
 #################################################################
 # --- FILL DB PIPELINE ---
